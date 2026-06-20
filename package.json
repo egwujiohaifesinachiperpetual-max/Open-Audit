@@ -10,7 +10,8 @@
     "lint": "next lint",
     "format": "prettier --write .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "db:benchmark-search-indexes": "./scripts/benchmark-search-indexes.sh"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.0.5",
