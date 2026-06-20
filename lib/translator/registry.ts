@@ -20,6 +20,8 @@
 import { createAllSacBlueprints } from "./blueprints/sac-transfer";
 import { createSacMintBurnBlueprint } from "./blueprints/sac-mint-burn";
 import { decodeEventName } from "./core";
+import { RegistryTemplateException } from "../errors";
+import { captureExceptionSync } from "../telemetry";
 import type {
   EventMatchCriteria,
   RawEvent,
@@ -224,7 +226,20 @@ export function translateEvents(
   return events.map(function (event: RawEvent): TranslatedEvent {
     try {
       return translateEvent(event, customBlueprints, lang);
-    } catch {
+    } catch (error) {
+      const templateError = new RegistryTemplateException(
+        error instanceof Error ? error.message : "Translation failed",
+        {
+          contractId: event.contractId,
+          ledgerSequence: event.ledger,
+          xdrHex: event.data,
+          txHash: event.txHash,
+          operation: "translateEvent",
+        },
+        error
+      );
+      captureExceptionSync(templateError);
+
       return {
         raw: event,
         description: null,

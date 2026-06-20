@@ -6,6 +6,8 @@
  */
 
 import { SorobanRpc } from "stellar-sdk";
+import { isOpenAuditError, normalizeError } from "../errors";
+import { captureExceptionSync } from "../telemetry";
 import type { StellarNetworkConfig } from "./client";
 import { fetchEventsWithRetry, DEFAULT_RETRY_CONFIG, type IndexerRetryConfig } from "./indexer";
 
@@ -156,7 +158,8 @@ export async function ingestHistoricalRange(
         [contractId],
         chunkStart,
         chunkEnd,
-        retryConfig
+        retryConfig,
+        networkConfig.sorobanRpcUrl
       );
 
       const events = response.events || [];
@@ -180,9 +183,19 @@ export async function ingestHistoricalRange(
         `[historical-ingester] Chunk ${chunkIndex + 1}/${totalChunks}: fetched ${events.length} events`
       );
     } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
+      const err = isOpenAuditError(error)
+        ? error
+        : normalizeError(error, "Historical ingestion chunk failed", {
+            contractId,
+            ledgerSequence: chunkStart,
+            chunkIndex,
+            operation: "ingestHistoricalRange",
+          });
 
-      // Invoke error callback
+      captureExceptionSync(err, {
+        context: { contractId, ledgerSequence: chunkStart, chunkIndex },
+      });
+
       if (onError) {
         onError(err, chunkIndex);
       } else {

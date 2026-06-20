@@ -13,6 +13,8 @@ import {
   setCachedEvents,
   isRedisEnabled,
 } from "../cache/redisCache";
+import { StellarNetworkException, XdrParsingException } from "../errors";
+import { captureExceptionSync } from "../telemetry";
 import { createIngestionPool, DEFAULT_WORKER_COUNT, type IngestionPoolMetrics } from "./ingestion-pool";
 import type { StellarNetworkConfig } from "./client";
 import type { RawEvent } from "../translator/types";
@@ -78,7 +80,7 @@ export function calculateRetryDelay(
 /**
  * Checks if an error is an HTTP 429 (Too Many Requests) error.
  */
-function isRetriableError(error: unknown): boolean {
+export function isRetriableError(error: unknown): boolean {
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
 
@@ -127,7 +129,8 @@ export async function fetchEventsWithRetry(
   contractIds: string[],
   startLedger: number,
   endLedger?: number,
-  retryConfig: IndexerRetryConfig = DEFAULT_RETRY_CONFIG
+  retryConfig: IndexerRetryConfig = DEFAULT_RETRY_CONFIG,
+  sorobanRpcUrl?: string
 ): Promise<SorobanRpc.Api.GetEventsResponse> {
   if (isRedisEnabled() && sorobanRpcUrl) {
     initRedis();
@@ -168,14 +171,24 @@ export async function fetchEventsWithRetry(
 
       // If it's not retriable, throw immediately
       if (!isRetriable) {
-        throw lastError;
+        throw new StellarNetworkException(lastError.message, {
+          contractId: contractIds[0],
+          ledgerSequence: startLedger,
+          operation: "fetchEventsWithRetry",
+        }, { cause: lastError, retriable: false });
       }
 
       // If we've exhausted all retries, throw
       if (attempt >= retryConfig.maxRetries) {
         const ledgerRange = endLedger ? `${startLedger}-${endLedger}` : `${startLedger}`;
-        throw new Error(
-          `Failed to fetch events after ${retryConfig.maxRetries} retries (ledgers ${ledgerRange}): ${lastError.message}`
+        throw new StellarNetworkException(
+          `Failed to fetch events after ${retryConfig.maxRetries} retries (ledgers ${ledgerRange}): ${lastError.message}`,
+          {
+            contractId: contractIds[0],
+            ledgerSequence: startLedger,
+            operation: "fetchEventsWithRetry",
+          },
+          { cause: lastError, retriable: true }
         );
       }
 
@@ -290,7 +303,8 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
           contractIds,
           cursor.lastLedger,
           undefined,
-          retryConfig
+          retryConfig,
+          networkConfig.sorobanRpcUrl
         );
 
         // Process the events
@@ -313,19 +327,30 @@ export function startEventIndexer(options: IndexerOptions): IndexerControls {
         // Wait before next poll
         await sleep(pollIntervalMs);
       } catch (error) {
-        const err = error instanceof Error ? error : new Error(String(error));
+        const willRetry = isRetriableError(error);
+        const err =
+          error instanceof StellarNetworkException
+            ? error
+            : new StellarNetworkException(
+                error instanceof Error ? error.message : String(error),
+                {
+                  contractId: contractIds[0],
+                  ledgerSequence: cursor.lastLedger,
+                  operation: "pollEvents",
+                },
+                { cause: error, retriable: willRetry }
+              );
 
-        // Check if we'll retry
-        const willRetry = isRateLimitError(error);
+        captureExceptionSync(err, {
+          context: { contractId: contractIds[0], ledgerSequence: cursor.lastLedger },
+        });
 
-        // Notify error handler
         if (onError) {
           onError(err, willRetry);
         } else {
           console.error(`[indexer] Error: ${err.message}`);
         }
 
-        // If it's not a rate limit error, wait before retrying
         if (!willRetry) {
           await sleep(pollIntervalMs);
         }
@@ -447,9 +472,19 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
     process: async (envelope) => {
       await onEvent(envelopeToRawEvent(envelope));
     },
-    onError: (err) => {
-      console.error("[streaming-indexer] Error processing event:", err);
-      if (onError) onError(err);
+    onError: (err, item) => {
+      const xdrError = new XdrParsingException(
+        err.message,
+        {
+          contractId: item.contractId,
+          ledgerSequence: item.ledger,
+          txHash: item.txHash,
+          operation: "envelopeToRawEvent",
+        },
+        err
+      );
+      captureExceptionSync(xdrError);
+      if (onError) onError(xdrError);
     },
   });
 
@@ -503,12 +538,28 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
                 });
               }
             } catch (err) {
-              console.error("[streaming-indexer] Error decoding transaction meta:", err);
+              const xdrError = new XdrParsingException(
+                err instanceof Error ? err.message : "Failed to decode transaction meta",
+                {
+                  ledgerSequence: tx.ledger_attr,
+                  txHash: tx.hash,
+                  xdrHex: tx.result_meta_xdr,
+                  operation: "decodeTransactionMeta",
+                },
+                err
+              );
+              captureExceptionSync(xdrError);
+              if (onError) onError(xdrError);
             }
           },
           onerror: (err) => {
-            console.error("[streaming-indexer] Stream error:", err);
-            if (onError) onError(new Error(String(err)));
+            const networkError = new StellarNetworkException(
+              String(err),
+              { operation: "horizonStream" },
+              { retriable: true, cause: err }
+            );
+            captureExceptionSync(networkError);
+            if (onError) onError(networkError);
 
             // Auto-reconnect logic
             if (isRunning) {
@@ -518,7 +569,13 @@ export function startHorizonStreamingIndexer(options: StreamingIndexerOptions): 
           },
         });
     } catch (err) {
-      console.error("[streaming-indexer] Failed to start stream:", err);
+      const networkError = new StellarNetworkException(
+        err instanceof Error ? err.message : "Failed to start Horizon stream",
+        { operation: "startHorizonStream" },
+        { retriable: true, cause: err }
+      );
+      captureExceptionSync(networkError);
+      if (onError) onError(networkError);
       if (isRunning) {
         setTimeout(startStream, 5000);
       }

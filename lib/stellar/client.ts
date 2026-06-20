@@ -8,6 +8,8 @@
  * with real Stellar SDK calls to connect to the live network.
  */
 
+import { StellarNetworkException } from "../errors";
+import { captureExceptionSync } from "../telemetry";
 import { eventResponseToRawEvent } from "./events";
 import type { RawEvent } from "../translator/types";
 
@@ -55,6 +57,12 @@ export function getConfigForNetwork(network: Network | string): StellarNetworkCo
   if (network === "mainnet") return MAINNET_CONFIG;
   if (network === "futurenet") return FUTURENET_CONFIG;
   return TESTNET_CONFIG;
+}
+
+/** Returns the active network config from `NEXT_PUBLIC_NETWORK` (defaults to testnet). */
+export function getNetworkConfig(): StellarNetworkConfig {
+  const network = process.env.NEXT_PUBLIC_NETWORK ?? "testnet";
+  return getConfigForNetwork(network);
 }
 
 /**
@@ -106,7 +114,17 @@ export async function fetchContractEvents(
       return eventResponseToRawEvent(event, fallbackContractId);
     });
   } catch (error) {
-    console.error("[open-audit] Error fetching contract events:", error);
-    throw error;
+    const contractId = Array.isArray(contractIds) ? contractIds[0] : contractIds;
+    const networkError = new StellarNetworkException(
+      error instanceof Error ? error.message : "Failed to fetch contract events",
+      {
+        contractId,
+        ledgerSequence: startLedger,
+        operation: "fetchContractEvents",
+      },
+      { cause: error, retriable: true }
+    );
+    captureExceptionSync(networkError);
+    throw networkError;
   }
 }

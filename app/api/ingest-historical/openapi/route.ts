@@ -10,6 +10,7 @@
  * }
  */
 
+import { toErrorResponse, validationErrorResponse } from "@/lib/api/error-response";
 import { ingestHistoricalRange } from "@/lib/stellar/historical-ingester";
 import { getNetworkConfig } from "@/lib/stellar/client";
 import { NextRequest, NextResponse } from "next/server";
@@ -50,35 +51,33 @@ interface IngestRequest {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  let contractId: string | undefined;
+
   try {
     const body: IngestRequest = await request.json();
+    contractId = body.contractId;
 
-    // Validate required fields
     if (!body.contractId || typeof body.startSequence !== "number" || typeof body.endSequence !== "number") {
-      return NextResponse.json(
-        { error: "Missing or invalid required fields: contractId, startSequence, endSequence" },
-        { status: 400 }
+      return validationErrorResponse(
+        "Missing or invalid required fields: contractId, startSequence, endSequence"
       );
     }
 
-    // Validate ranges
     if (body.startSequence < 1 || body.endSequence < body.startSequence) {
-      return NextResponse.json(
-        { error: "Invalid sequence range: startSequence >= 1 and endSequence >= startSequence" },
-        { status: 400 }
+      return validationErrorResponse(
+        "Invalid sequence range: startSequence >= 1 and endSequence >= startSequence"
       );
     }
 
     const chunkSize = body.chunkSize ?? 1000;
     if (chunkSize < 1) {
-      return NextResponse.json({ error: "chunkSize must be >= 1" }, { status: 400 });
+      return validationErrorResponse("chunkSize must be >= 1");
     }
 
     const networkConfig = getNetworkConfig();
     const events: unknown[] = [];
     let totalChunks = 0;
 
-    // Ingest historical range
     await ingestHistoricalRange({
       networkConfig,
       contractId: body.contractId,
@@ -88,12 +87,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       onChunkComplete: async (result) => {
         events.push(...result.events);
       },
-      onComplete: async (totalEvents, chunks) => {
+      onComplete: async (_totalEvents, chunks) => {
         totalChunks = chunks;
-      },
-      onError: (error) => {
-        console.error("[api/ingest-historical] Error:", error);
-        throw error;
       },
     });
 
@@ -111,11 +106,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    console.error("[api/ingest-historical] Request failed:", error);
-    return NextResponse.json(
-      { error: "Ingestion failed", details: message },
-      { status: 500 }
-    );
+    return toErrorResponse(error, {
+      fallbackMessage: "Ingestion failed",
+      context: contractId ? { contractId, operation: "ingest-historical" } : { operation: "ingest-historical" },
+    });
   }
 }
