@@ -13,6 +13,7 @@
 import { ingestHistoricalRange } from "@/lib/stellar/historical-ingester";
 import { getNetworkConfig } from "@/lib/stellar/client";
 import { NextRequest, NextResponse } from "next/server";
+import { authenticateAndRateLimit } from "@/lib/api/middleware";
 
 // OpenAPI documentation metadata
 export const routeDoc = {
@@ -51,6 +52,9 @@ interface IngestRequest {
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
+    const authError = await authenticateAndRateLimit(request);
+    if (authError) return authError;
+
     const body: IngestRequest = await request.json();
 
     // Validate required fields
