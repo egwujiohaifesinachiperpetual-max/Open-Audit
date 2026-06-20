@@ -14,8 +14,26 @@ import { startEventIndexer } from "./indexer";
 import { getConfigForNetwork } from "./client";
 import { eventResponseToRawEvent } from "./events";
 import { translateEvents } from "@/lib/translator/registry";
-import type { TranslatedEvent } from "@/lib/translator/types";
-import type { Network } from "@/lib/hooks/useNetwork";
+import type { SorobanRpc } from "stellar-sdk";
+import type { RawEvent, TranslatedEvent } from "@/lib/translator/types";
+
+/**
+ * Convert a Stellar SDK event response to our RawEvent format.
+ */
+function convertToRawEvent(
+  event: SorobanRpc.Api.EventResponse,
+  contractId: string
+): RawEvent {
+  return {
+    id: event.id,
+    contractId,
+    topics: event.topic.map((t) => t.toString()), // Array of hex-encoded topics
+    data: event.value.toString(), // XDR-encoded data
+    ledger: event.ledger,
+    timestamp: Date.now(), // Note: You may want to get actual block timestamp
+    txHash: event.txHash ?? "",
+  };
+}
 
 /**
  * Simple in-memory event store for demonstration.
@@ -48,9 +66,7 @@ class EventStore {
    */
   getAllEvents(): TranslatedEvent[] {
     const allEvents: TranslatedEvent[] = [];
-    this.events.forEach(function (events) {
-      allEvents.push(...events);
-    });
+    this.events.forEach((events) => allEvents.push(...events));
     // Sort by timestamp descending
     return allEvents.sort(function (a, b) {
       return b.raw.timestamp - a.raw.timestamp;
