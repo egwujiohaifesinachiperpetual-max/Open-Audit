@@ -51,6 +51,12 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+For the custom server with WebSocket support and `/metrics`, run:
+
+```bash
+npm run dev:ws
+```
+
 ### Environment Variables
 
 Copy `.env.example` to `.env.local` and fill in the values:
@@ -104,6 +110,21 @@ npm run lint             # Run ESLint
 npm run lint:registry    # Validate translation registry
 npm run format           # Format code with Prettier
 ```
+
+---
+
+## Telemetry
+
+The custom server exposes Prometheus metrics on `http://localhost:3000/metrics` when running `npm run dev:ws`.
+
+You can configure OpenTelemetry to export spans to Jaeger by setting:
+
+```bash
+export JAEGER_ENDPOINT="http://localhost:14268/api/traces"
+export OTEL_SERVICE_NAME="open-audit"
+```
+
+The default Jaeger endpoint is `http://localhost:14268/api/traces`.
 
 ---
 
