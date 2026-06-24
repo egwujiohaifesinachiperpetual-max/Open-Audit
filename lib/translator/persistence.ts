@@ -8,11 +8,12 @@
  */
 
 import type { RawEvent, TranslatedEvent } from "./types";
-import { translateEvent } from "./registry";
-import { db } from "@/lib/db/client";
-import { processEventForIpfs } from "@/lib/ipfs/offloader";
-import { triggerWebhooksForEvent } from "@/lib/jobs/queue";
-import { OpenAuditError } from "@/lib/errors";
+import { translateWithCache } from "./registry";
+import { db } from "../db/client";
+import { processEventForIpfs } from "../ipfs/offloader";
+import { triggerWebhooksForEvent } from "../jobs/queue";
+import { OpenAuditError } from "../errors";
+import { setCachedTranslation, isRedisEnabled } from "../cache/redisCache";
 
 interface DeadLetterPayload {
   errorCode: string;
@@ -52,7 +53,7 @@ export async function translateAndPersistEvent(
   let translated: TranslatedEvent;
 
   try {
-    translated = await translateEvent(rawEvent);
+    translated = await translateWithCache(rawEvent);
   } catch (error) {
     const errorCode = error instanceof OpenAuditError ? error.code : "INTERNAL_ERROR";
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -113,6 +114,10 @@ export async function translateAndPersistEvent(
 
     translated.raw.data = processed.data;
     translated.raw.topics = processed.topics;
+
+    if (isRedisEnabled()) {
+      await setCachedTranslation(rawEvent, translated);
+    }
 
     return translated;
   } catch (error) {

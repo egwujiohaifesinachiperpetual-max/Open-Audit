@@ -24,11 +24,13 @@ import { sanitizeTextField } from "./core";
 import { decodeGenericEventPayload, formatGenericValue } from "./generic-fallback-decoder";
 import { RegistryTemplateException } from "../errors";
 import { captureExceptionSync } from "../telemetry";
+import { getCachedTranslation, setCachedTranslation, isRedisEnabled } from "../cache/redisCache";
 import type {
   EventMatchCriteria,
   RawEvent,
   TranslatedEvent,
   TranslationBlueprint,
+  VersionedTranslationBlueprint,
   Language,
 } from "./types";
 
@@ -36,7 +38,52 @@ import type {
  * The registry maps contract IDs to an array of versioned blueprints,
  * sorted descending by validFromLedger so the newest schema is tried first.
  */
-type BlueprintRegistry = Map<string, VersionedTranslationBlueprint[]>;
+type BlueprintRegistry = Map<string, TranslationBlueprint | VersionedTranslationBlueprint[]>;
+
+export type PersistedRawEvent = RawEvent & Partial<Pick<TranslatedEvent, "description" | "status" | "blueprintName" | "eventType" | "schemaVersion">>;
+
+function hasPersistedTranslation(event: PersistedRawEvent): boolean {
+  return (
+    event.status !== undefined ||
+    event.description !== undefined ||
+    event.blueprintName !== undefined ||
+    event.eventType !== undefined ||
+    event.schemaVersion !== undefined
+  );
+}
+
+function buildTranslationFromPersisted(event: PersistedRawEvent): TranslatedEvent {
+  return {
+    raw: event,
+    description: event.description ?? null,
+    status: event.status ?? "cryptic",
+    blueprintName: event.blueprintName ?? null,
+    eventType: event.eventType ?? null,
+    schemaVersion: event.schemaVersion ?? null,
+  };
+}
+
+export async function translateWithCache(
+  event: PersistedRawEvent,
+  customBlueprints?: Map<string, TranslationBlueprint>,
+  lang: Language = "en"
+): Promise<TranslatedEvent> {
+  if (event.txHash && event.id && isRedisEnabled()) {
+    const cached = await getCachedTranslation(event);
+    if (cached) return cached;
+  }
+
+  const translated =
+    hasPersistedTranslation(event) && event.status !== undefined
+      ? buildTranslationFromPersisted(event)
+      : translateEvent(event, customBlueprints, lang);
+
+  if (event.txHash && event.id && isRedisEnabled()) {
+    await setCachedTranslation(event, translated);
+  }
+
+  return translated;
+}
 
 /**
  * Builds the global blueprint registry by collecting all known blueprints.
@@ -64,8 +111,8 @@ function buildRegistry(): BlueprintRegistry {
     const mintBurnBlueprint = createSacMintBurnBlueprint(contractId);
     const existing = registry.get(contractId);
     if (existing) {
-      // Merge by creating a combined translate function
-      const originalTranslate = existing.translate;
+      const existingBlueprint = Array.isArray(existing) ? existing[0] : existing;
+      const originalTranslate = existingBlueprint.translate.bind(existingBlueprint);
       registry.set(contractId, {
         ...mintBurnBlueprint,
         translate: (event, lang) => originalTranslate(event, lang) ?? mintBurnBlueprint.translate(event, lang),
@@ -162,6 +209,7 @@ export function translateEvent(
       status: "cryptic",
       blueprintName: Array.isArray(entry) ? entry[0].contractName : entry.contractName,
       eventType: null,
+      schemaVersion: null,
     };
   }
 
@@ -174,6 +222,7 @@ export function translateEvent(
     status: "cryptic",
     blueprintName: blueprint.contractName ? sanitizeTextField(blueprint.contractName, { maxLength: 100 }) : null,
     eventType: null,
+    schemaVersion: null,
   };
 }
 
@@ -327,13 +376,22 @@ export function getBlueprintCount(): number {
  * Call this to add or upgrade a contract's translation schemas without
  * rebuilding the singleton. The blueprint list is re-sorted after insertion.
  */
-export function registerBlueprint(...blueprints: VersionedTranslationBlueprint[]): void {
+export function registerBlueprint(...blueprints: TranslationBlueprint[]): void {
   for (const blueprint of blueprints) {
-    const existing = REGISTRY.get(blueprint.contractId) ?? [];
-    existing.push(blueprint);
+    const existing = REGISTRY.get(blueprint.contractId);
+    if (!existing) {
+      REGISTRY.set(blueprint.contractId, blueprint);
+      continue;
+    }
+
+    const merged: VersionedTranslationBlueprint[] = Array.isArray(existing)
+      ? [...existing]
+      : [{ ...existing } as VersionedTranslationBlueprint];
+
+    merged.push(blueprint as VersionedTranslationBlueprint);
     REGISTRY.set(
       blueprint.contractId,
-      existing.sort((a, b) => (b.validFromLedger ?? 0) - (a.validFromLedger ?? 0))
+      merged.sort((a, b) => (b.validFromLedger ?? 0) - (a.validFromLedger ?? 0))
     );
   }
 }
