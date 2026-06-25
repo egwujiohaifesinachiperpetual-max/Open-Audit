@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { RawDataDialog } from "./RawDataDialog";
+import { EventDetailsModal } from "./EventDetailsModal";
 import { ContributeDialog } from "./ContributeDialog";
 import { DagPanel } from "@/components/dag/DagPanel";
 import { formatRelativeTime, truncateHex } from "@/lib/translator/decode";
@@ -53,6 +53,7 @@ function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.J
       </Badge>
     );
   }
+
   if (status === "pending") {
     return (
       <Badge variant="secondary" className="gap-1 whitespace-nowrap">
@@ -62,6 +63,7 @@ function StatusBadge({ status }: { status: TranslatedEvent["status"] }): React.J
       </Badge>
     );
   }
+
   return (
     <Badge variant="warning" className="gap-1 whitespace-nowrap">
       <HelpCircle className="h-3 w-3" aria-hidden="true" />
@@ -94,10 +96,9 @@ export function EventFeedTable({
   onToggleColumn,
   onDensityChange,
 }: EventFeedTableProps): React.JSX.Element {
-  const [rawDialogEvent, setRawDialogEvent] = useState<RawEvent | null>(null);
+  const [detailsEvent, setDetailsEvent] = useState<TranslatedEvent | null>(null);
   const [contributeDialogEvent, setContributeDialogEvent] = useState<RawEvent | null>(null);
   const [showColMenu, setShowColMenu] = useState(false);
-  /** txHash of the event whose execution DAG is being viewed, or null. */
   const [dagTxHash, setDagTxHash] = useState<string | null>(null);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTableSectionElement>) => {
@@ -121,7 +122,6 @@ export function EventFeedTable({
 
   return (
     <>
-      {/* Toolbar */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <span>Density:</span>
@@ -250,8 +250,7 @@ export function EventFeedTable({
                       {columns.contract && (
                         <TableCell className={`${cellPadding} hidden md:table-cell`}>
                           <span className="font-mono text-xs text-muted-foreground">
-                            {event.raw.contractId.slice(0, 6)}...
-                            {event.raw.contractId.slice(-4)}
+                            {event.raw.contractId.slice(0, 6)}...{event.raw.contractId.slice(-4)}
                           </span>
                         </TableCell>
                       )}
@@ -263,14 +262,13 @@ export function EventFeedTable({
                               variant="ghost"
                               size="sm"
                               className="h-8 px-2 text-xs"
-                              aria-label={`View raw data for event ${event.raw.id}`}
-                              onClick={() => setRawDialogEvent(event.raw)}
+                              aria-label={`View event details for event ${event.raw.id}`}
+                              onClick={() => setDetailsEvent(event)}
                             >
                               <Eye className="h-3.5 w-3.5 mr-1" />
-                              View Raw
+                              View Details
                             </Button>
 
-                            {/* Execution DAG — only available when txHash is present */}
                             {event.raw.txHash && (
                               <Button
                                 variant="ghost"
@@ -317,21 +315,26 @@ export function EventFeedTable({
         </Table>
       </div>
 
-      <RawDataDialog
-        event={rawDialogEvent}
-        open={rawDialogEvent !== null}
-        onOpenChange={(open) => { if (!open) setRawDialogEvent(null); }}
+      <EventDetailsModal
+        event={detailsEvent}
+        open={detailsEvent !== null}
+        onOpenChange={(open) => {
+          if (!open) setDetailsEvent(null);
+        }}
       />
       <ContributeDialog
         event={contributeDialogEvent}
         open={contributeDialogEvent !== null}
-        onOpenChange={(open) => { if (!open) setContributeDialogEvent(null); }}
+        onOpenChange={(open) => {
+          if (!open) setContributeDialogEvent(null);
+        }}
       />
 
-      {/* ── Execution DAG dialog ─────────────────────────────────────────── */}
       <Dialog
         open={dagTxHash !== null}
-        onOpenChange={(open) => { if (!open) setDagTxHash(null); }}
+        onOpenChange={(open) => {
+          if (!open) setDagTxHash(null);
+        }}
       >
         <DialogContent className="max-w-3xl w-full p-0 overflow-hidden">
           <DialogHeader className="px-4 pt-4 pb-0">
