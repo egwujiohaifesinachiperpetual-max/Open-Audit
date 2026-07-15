@@ -1,10 +1,5 @@
 import { Counter, Histogram, Registry, collectDefaultMetrics } from "prom-client";
-import { context, diag, DiagConsoleLogger, DiagLogLevel, trace } from "@opentelemetry/api";
-import { NodeSDK } from "@opentelemetry/sdk-node";
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-grpc";
-import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
-import { resourceFromAttributes } from "@opentelemetry/resources";
-import { SemanticResourceAttributes } from "@opentelemetry/semantic-conventions";
+import { diag, DiagConsoleLogger, DiagLogLevel, trace } from "@opentelemetry/api";
 
 export const metricsRegistry = new Registry();
 
@@ -42,33 +37,50 @@ export const translationProcessingMs = new Histogram({
 const otlpEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://localhost:4317";
 const serviceName = process.env.OTEL_SERVICE_NAME ?? "open-audit";
 
-const sdk = new NodeSDK({
-  traceExporter: new OTLPTraceExporter({
-    url: otlpEndpoint,
-  }),
-  instrumentations: [new HttpInstrumentation()],
-  resource: resourceFromAttributes({
-    [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
-  }),
-});
-
 export const tracer = trace.getTracer("open-audit");
 
+let telemetrySdk: { start: () => Promise<void>; shutdown: () => Promise<void> } | null = null;
+
 export async function startTelemetry(): Promise<void> {
-  diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.INFO);
-  await sdk.start();
-  console.log(`[telemetry] OpenTelemetry initialized (OTLP endpoint=${otlpEndpoint})`);
+  if (telemetrySdk) {
+    return;
+  }
+
+  try {
+    const [{ NodeSDK }, { OTLPTraceExporter }, { HttpInstrumentation }, { resourceFromAttributes }, { SemanticResourceAttributes }] = await Promise.all([
+      import("@opentelemetry/sdk-node"),
+      import("@opentelemetry/exporter-trace-otlp-grpc"),
+      import("@opentelemetry/instrumentation-http"),
+      import("@opentelemetry/resources"),
+      import("@opentelemetry/semantic-conventions"),
+    ]);
+
+    telemetrySdk = new NodeSDK({
+      traceExporter: new OTLPTraceExporter({
+        url: otlpEndpoint,
+      }),
+      instrumentations: [new HttpInstrumentation()],
+      resource: resourceFromAttributes({
+        [SemanticResourceAttributes.SERVICE_NAME]: serviceName,
+      }),
+    });
+
+    diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.INFO);
+    await telemetrySdk.start();
+    console.log(`[telemetry] OpenTelemetry initialized (OTLP endpoint=${otlpEndpoint})`);
+  } catch (error) {
+    console.warn("[telemetry] OpenTelemetry initialization skipped:", error);
+  }
 }
 
 export async function shutdownTelemetry(): Promise<void> {
-  await sdk.shutdown();
-  console.log("[telemetry] OpenTelemetry shutdown complete");
-}
+  if (!telemetrySdk) {
+    return;
+  }
 
-export function captureExceptionSync(error: Error, options?: { context?: Record<string, unknown> }): void {
-  const contextInfo = options?.context ? ` | context=${JSON.stringify(options.context)}` : "";
-  diag.error(`Captured exception: ${error.message}${contextInfo}`);
-  console.error("[telemetry] Captured exception:", error, options?.context ?? "");
+  await telemetrySdk.shutdown();
+  telemetrySdk = null;
+  console.log("[telemetry] OpenTelemetry shutdown complete");
 }
 
 export async function metricsHandler(res: import("http").ServerResponse): Promise<void> {

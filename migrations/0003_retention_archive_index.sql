@@ -1,4 +1,4 @@
--- Migration: 0002_retention_archive_index
+-- Migration: 0003_retention_archive_index
 --
 -- Adds a partial index on Event.createdAt to make the retention archiver's
 -- eligibility query (WHERE createdAt < :cutoff) fast even on large tables.

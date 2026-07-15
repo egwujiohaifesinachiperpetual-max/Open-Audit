@@ -45,7 +45,8 @@ import { translateEvent } from "./lib/translator/registry";
 import { processEventForIpfs } from "./lib/ipfs/offloader";
 import { createFileIngestionStateStore, startResilientEventIngestion } from "./lib/stellar/indexer";
 import { getNetworkConfig } from "./lib/stellar/client";
-import { captureExceptionSync, eventsIngestedTotal, metricsHandler, recordTranslationDuration, startTelemetry } from "./lib/telemetry";
+import { captureExceptionSync } from "./lib/telemetry";
+import { eventsIngestedTotal, metricsHandler, recordTranslationDuration, startTelemetry } from "./lib/metrics";
 import { startRetentionScheduler } from "./lib/retention/scheduler";
 
 const dev = process.env.NODE_ENV !== "production";

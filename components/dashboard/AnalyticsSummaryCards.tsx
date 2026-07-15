@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Activity, AlertTriangle, TrendingUp, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { cn } from "@/lib/cn";
 import type { TranslatedEvent } from "@/lib/translator/types";
 
 interface AnalyticsSummaryCardsProps {

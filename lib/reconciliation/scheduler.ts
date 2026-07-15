@@ -7,8 +7,10 @@
 import cron from "node-cron";
 import { db } from "@/lib/db/client";
 import { addReconciliationJob, getReconciliationQueue } from "@/lib/jobs/queue";
-import { getReconciliationConfig } from "@/lib/reconciliation/engine";
+import { getReconciliationConfig as getReconciliationConfigFromEngine } from "@/lib/reconciliation/engine";
 import { getCursor } from "@/lib/db/utils";
+
+export const getReconciliationConfig = getReconciliationConfigFromEngine;
 
 let scheduledJob: cron.ScheduledTask | null = null;
 

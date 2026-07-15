@@ -9,7 +9,8 @@ import { SorobanRpc } from "stellar-sdk";
 import { isOpenAuditError, normalizeError } from "../errors";
 import type { StellarNetworkConfig } from "./client";
 import { fetchEventsWithRetry, DEFAULT_RETRY_CONFIG, type IndexerRetryConfig } from "./indexer";
-import { captureExceptionSync, eventsIngestedTotal } from "../telemetry";
+import { captureExceptionSync } from "../telemetry";
+import { eventsIngestedTotal } from "../metrics";
 
 /** Configuration for historical ingestion. */
 export interface HistoricalIngestionConfig {
