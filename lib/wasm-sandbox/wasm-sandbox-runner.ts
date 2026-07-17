@@ -166,11 +166,11 @@ export class WasmSandboxRunner {
       this.validateInput(input);
 
       // Load and compile WASM module
-      const module = await this.loadModule(wasmPath);
+      const wasmModule = await this.loadModule(wasmPath);
 
       // Execute in isolated environment with timeout
       const result = await this.executeWithTimeout(
-        module,
+        wasmModule,
         input,
         MAX_EXECUTION_TIME_MS
       );
@@ -241,12 +241,10 @@ export class WasmSandboxRunner {
       const wasmBytes = await readFile(wasmPath);
 
       // Compile module
-      const module = await WebAssembly.compile(wasmBytes);
+      const wasmModule = await WebAssembly.compile(wasmBytes);
 
-      // Cache for reuse
-      this.instanceCache.set(wasmPath, module);
-
-      return module;
+      this.instanceCache.set(wasmPath, wasmModule);
+      return wasmModule;
     } catch (error) {
       throw new WasmExecutionError(
         `Failed to load WASM module from ${wasmPath}: ${error instanceof Error ? error.message : String(error)}`,
