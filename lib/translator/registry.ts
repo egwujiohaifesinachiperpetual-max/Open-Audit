@@ -195,6 +195,53 @@ function buildRegistry(): BlueprintRegistry {
   return registry;
 }
 
+function interpolate(template: string, values: Record<string, any>): string {
+  return template.replace(/\{([^}]+)\}/g, (match, key) => {
+    const [path, format] = key.split(".");
+    const val = values[path];
+    if (val && typeof val === "object" && format) {
+      return val[format] ?? match;
+    }
+    return val ?? match;
+  });
+}
+
+function createTranslateFromMapping(mapping: any) {
+  return (event: RawEvent, lang: Language): TranslationResult | null => {
+    // 1. Match topics
+    for (let i = 0; i < mapping.topics.length; i++) {
+      if (i === 0) {
+        if (decodeEventName(event.topics[0]) !== mapping.topics[0]) return null;
+      }
+      // Future: support matching other topics too
+    }
+
+    const fields: Record<string, any> = {};
+
+    // 2. Extract topics[1..]
+    mapping.event_structure.topics.forEach((t: any, i: number) => {
+      const hex = event.topics[i + 1];
+      if (!hex) return;
+      if (t.type === "address") fields[t.name] = decodeAddress(hex);
+      else if (t.type === "i128") fields[t.name] = decodeAmount(hex);
+      else fields[t.name] = hex;
+    });
+
+    // 3. Extract data
+    if (mapping.event_structure.data) {
+      const d = mapping.event_structure.data;
+      if (d.type === "i128") fields[d.name] = decodeAmount(event.data);
+      else if (d.type === "address") fields[d.name] = decodeAddress(event.data);
+      else fields[d.name] = event.data;
+    }
+
+    return {
+      description: interpolate(mapping.english_template, fields),
+      eventType: mapping.topics[0],
+    };
+  };
+}
+
 /**
  * Dynamically registers a new schema for a contract.
  * Useful for handling contract upgrades (update_current_contract_wasm) at runtime.
@@ -481,20 +528,29 @@ export function getBlueprintCount(): number {
  */
 export function registerBlueprint(...blueprints: TranslationBlueprint[]): void {
   for (const blueprint of blueprints) {
-    const existing = REGISTRY.get(blueprint.contractId);
-    if (!existing) {
-      REGISTRY.set(blueprint.contractId, blueprint);
-      continue;
+    let entry = REGISTRY.get(blueprint.contractId);
+    if (!entry) {
+      entry = {
+        contractId: blueprint.contractId,
+        contractName: blueprint.contractName,
+        schemas: [],
+      };
+      REGISTRY.set(blueprint.contractId, entry);
     }
 
-    const merged: VersionedTranslationBlueprint[] = Array.isArray(existing)
-      ? [...existing]
-      : [{ ...existing } as VersionedTranslationBlueprint];
+    const fromLedger = (blueprint as VersionedTranslationBlueprint).validFromLedger ?? 0;
+    const version = (blueprint as VersionedTranslationBlueprint).version ?? "1.0.0";
 
-    merged.push(blueprint as VersionedTranslationBlueprint);
-    REGISTRY.set(
-      blueprint.contractId,
-      merged.sort((a, b) => (b.validFromLedger ?? 0) - (a.validFromLedger ?? 0))
-    );
+    entry.schemas.push({
+      version,
+      validFromLedger: fromLedger,
+      validToLedger: null,
+      blueprint,
+    });
+
+    entry.schemas.sort((a, b) => a.validFromLedger - b.validFromLedger);
+    for (let i = 0; i < entry.schemas.length - 1; i++) {
+      entry.schemas[i].validToLedger = entry.schemas[i + 1].validFromLedger - 1;
+    }
   }
 }
