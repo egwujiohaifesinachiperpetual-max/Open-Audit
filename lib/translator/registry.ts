@@ -19,7 +19,7 @@
 
 import { createAllSacBlueprints } from "./blueprints/sac-transfer";
 import { createSacMintBurnBlueprint } from "./blueprints/sac-mint-burn";
-import { createSoroswapRouterBlueprint } from "./blueprints/soroswap-router";
+import { createAllSdexBlueprints } from "./blueprints/sdex-orderbook";
 import { decodeEventName } from "./core";
 import { sanitizeTextField } from "./core";
 import { decodeGenericEventPayload, formatGenericValue } from "./generic-fallback-decoder";
@@ -199,12 +199,9 @@ function buildRegistry(): BlueprintRegistry {
     }
   }
 
-  // Official Soroswap Router deployments (Testnet and Mainnet).
-  for (const contractId of [
-    "CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD",
-    "CAG5LRYQ5JVEUI5TEID72EYOVX44TTUJT5BQR2J6J77FH65PCCFAJDDH",
-  ]) {
-    register(createSoroswapRouterBlueprint(contractId));
+  // 3. Load SDEX (Stellar Classic Order Book) Blueprints
+  for (const blueprint of createAllSdexBlueprints()) {
+    register(blueprint);
   }
 
   return registry;
