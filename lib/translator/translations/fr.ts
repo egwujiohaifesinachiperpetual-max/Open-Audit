@@ -25,4 +25,29 @@ export const FR_TRANSLATIONS = {
       OfferFilled: "Offre Exécutée",
     },
   },
+  soroswap: {
+    swap: (tokenIn: string, amountIn: string, tokenOut: string, amountOut: string) =>
+      `A échangé ${amountIn} de [${tokenIn}] contre ${amountOut} de [${tokenOut}]`,
+    addLiquidity: (
+      tokenA: string,
+      amountA: string,
+      tokenB: string,
+      amountB: string,
+      liquidity: string
+    ) =>
+      `A ajouté ${amountA} de [${tokenA}] et ${amountB} de [${tokenB}] (${liquidity} jetons de liquidité)`,
+    removeLiquidity: (
+      tokenA: string,
+      amountA: string,
+      tokenB: string,
+      amountB: string,
+      liquidity: string
+    ) =>
+      `A retiré ${amountA} de [${tokenA}] et ${amountB} de [${tokenB}] en brûlant ${liquidity} jetons de liquidité`,
+    eventTypes: {
+      Swap: "Échange",
+      AddLiquidity: "Ajouter de la liquidité",
+      RemoveLiquidity: "Retirer de la liquidité",
+    },
+  },
 };
