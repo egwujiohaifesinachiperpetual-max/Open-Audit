@@ -19,9 +19,8 @@
 
 import { createAllSacBlueprints } from "./blueprints/sac-transfer";
 import { createSacMintBurnBlueprint } from "./blueprints/sac-mint-burn";
-import { createAllSdexBlueprints } from "./blueprints/sdex-orderbook";
-import { createSoroswapRouterBlueprint } from "./blueprints/soroswap-router";
-import { decodeAddress, decodeAmount, decodeEventName, sanitizeTextField } from "./core";
+import { decodeEventName } from "./core";
+import { sanitizeTextField } from "./core";
 import { decodeGenericEventPayload, formatGenericValue } from "./generic-fallback-decoder";
 import { RegistryTemplateException } from "../errors";
 import type {
@@ -46,13 +45,7 @@ const RESOLUTION_CACHE: Map<string, ContractSchema> = new Map();
  * Interpolates a template string with values from an object.
  * e.g. "Hello {name}" + { name: "World" } -> "Hello World"
  */
-export type PersistedRawEvent = RawEvent &
-  Partial<
-    Pick<
-      TranslatedEvent,
-      "description" | "status" | "blueprintName" | "eventType" | "schemaVersion"
-    >
-  >;
+export type PersistedRawEvent = RawEvent & Partial<Pick<TranslatedEvent, "description" | "status" | "blueprintName" | "eventType" | "schemaVersion">>;
 
 function hasPersistedTranslation(event: PersistedRawEvent): boolean {
   return (
@@ -199,19 +192,6 @@ function buildRegistry(): BlueprintRegistry {
     }
   }
 
-  // 3. Load SDEX (Stellar Classic Order Book) Blueprints
-  for (const blueprint of createAllSdexBlueprints()) {
-    register(blueprint);
-  }
-
-  // Official Soroswap Router deployments (Testnet and Mainnet).
-  for (const contractId of [
-    "CCJUD55AG6W5HAI5LRVNKAE5WDP5XGZBUDS5WNTIVDU7O264UZZE7BRD",
-    "CAG5LRYQ5JVEUI5TEID72EYOVX44TTUJT5BQR2J6J77FH65PCCFAJDDH",
-  ]) {
-    register(createSoroswapRouterBlueprint(contractId));
-  }
-
   return registry;
 }
 
@@ -318,8 +298,8 @@ function resolveSchema(
   ledger: number,
   customBlueprints?: Map<string, TranslationBlueprint>
 ): ContractSchema | null {
-  // 1. Check Custom (local) blueprints first.
-  // Custom blueprints are currently not versioned in this implementation,
+  // 1. Check Custom (local) blueprints first. 
+  // Custom blueprints are currently not versioned in this implementation, 
   // but we treat them as "always valid" for the current session.
   const custom = customBlueprints?.get(contractId);
   if (custom) {
@@ -365,23 +345,19 @@ export function translateEvent(
 
   if (!schema) {
     console.warn(`No translation blueprint found for contract ${event.contractId}`);
-
+    
     // Try to decode the event using the generic fallback decoder
     const genericDecoded = decodeGenericEventPayload(event);
     const description = genericDecoded
       ? `[Unregistered Contract] ${formatGenericValue(genericDecoded)}`
       : `[Unknown Event: No blueprint registered for contract ${event.contractId}. Hex Data: ${event.data}]`;
-
+    
     return {
       raw: event,
       description: sanitizeTextField(description, { maxLength: 512 }),
       status: "cryptic",
       // Surface the custom contract name (if any) so the UI still has context.
-      blueprintName: customBlueprints?.get(event.contractId)?.contractName
-        ? sanitizeTextField(customBlueprints.get(event.contractId)!.contractName, {
-            maxLength: 100,
-          })
-        : "Unregistered Contract",
+      blueprintName: customBlueprints?.get(event.contractId)?.contractName ? sanitizeTextField(customBlueprints.get(event.contractId)!.contractName, { maxLength: 100 }) : "Unregistered Contract",
       eventType: null,
       schemaVersion: null,
     };
@@ -404,11 +380,7 @@ export function translateEvent(
  * Runs a single blueprint against an event, returning a translated event or
  * null when the blueprint cannot handle it.
  */
-function applyBlueprint(
-  event: RawEvent,
-  blueprint: TranslationBlueprint,
-  lang: Language
-): TranslatedEvent | null {
+function applyBlueprint(event: RawEvent, blueprint: TranslationBlueprint, lang: Language): TranslatedEvent | null {
   if (blueprint.matches && !blueprint.matches(event)) return null;
 
   const result = blueprint.translate(event, lang);
@@ -428,7 +400,10 @@ function applyBlueprint(
  * Returns true when an event satisfies every requested criterion.
  * Useful for blueprints that must match more than the event signature topic.
  */
-export function matchesEventCriteria(event: RawEvent, criteria: EventMatchCriteria): boolean {
+export function matchesEventCriteria(
+  event: RawEvent,
+  criteria: EventMatchCriteria
+): boolean {
   if (criteria.contractId && event.contractId !== criteria.contractId) {
     return false;
   }
@@ -448,7 +423,10 @@ export function matchesEventCriteria(event: RawEvent, criteria: EventMatchCriter
       return false;
     }
 
-    if (topicCriteria.decodedName && decodeEventName(topic) !== topicCriteria.decodedName) {
+    if (
+      topicCriteria.decodedName &&
+      decodeEventName(topic) !== topicCriteria.decodedName
+    ) {
       return false;
     }
   }
