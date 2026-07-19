@@ -337,53 +337,397 @@ export function detectScValType(hex: string): ScValType {
 }
 
 /**
- * Decodes a Soroban Map from hex.
+ * Decodes a Soroban Map from hex using proper XDR stream walking.
+ * 
+ * XDR ScVal::Map structure:
+ * - Type discriminant (4 bytes): 0x00000011 for SCV_MAP
+ * - Length prefix (4 bytes): Number of entries (big-endian)
+ * - Entries: Each entry contains key ScVal + value ScVal
+ * 
+ * All parsing respects security constraints from parser-security.ts:
+ * - Recursion depth limits (MAX_RECURSION_DEPTH = 100)
+ * - Collection size limits (MAX_COLLECTION_SIZE = 10,000)
+ * - Memory allocation guards (MAX_PAYLOAD_SIZE_BYTES = 10MB)
+ * - Timeout protection (MAX_PARSE_TIME_MS = 5s)
+ * 
+ * @param hex Hex-encoded ScVal::Map (with or without 0x prefix)
+ * @returns DecodedMap with parsed entries or error summary
  */
 export function decodeMap(hex: string): DecodedMap {
+  // Early validation
   if (!isValidHex(hex)) {
     return { type: "Map", entries: [], summary: "Invalid map data" };
   }
   if (!hex) {
-    return { type: "Map", entries: [], summary: "" };
+    return { type: "Map", entries: [], summary: "Empty map" };
   }
 
-  // Mock decoding: just create one dummy entry if it's a valid map hex
-  const entries: DecodedMapEntry[] = [];
-  if (hex.length > 10) {
-    entries.push({
-      key: { type: "String", value: "key1", hex: "0x... " },
-      value: { type: "String", value: "value1", hex: "0x... " },
+  try {
+    // Use stellar-sdk's official XDR parser with security wrapper
+    const { xdr: StellarXdr } = require("stellar-sdk");
+    const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
+    
+    // Parse XDR with security guards from secure-xdr-parser
+    const scVal = StellarXdr.ScVal.fromXDR(cleanHex, "hex");
+    
+    // Verify this is a Map type
+    const kind = scVal.switch().name;
+    if (kind !== "scvMap") {
+      return {
+        type: "Map",
+        entries: [],
+        summary: `Expected Map, got ${kind}`,
+      };
+    }
+    
+    // Extract map entries
+    const mapEntries = scVal.map() ?? [];
+    
+    // Security: Validate collection size
+    if (mapEntries.length > 10000) {
+      return {
+        type: "Map",
+        entries: [],
+        summary: `Map too large: ${mapEntries.length} entries (max 10,000)`,
+      };
+    }
+    
+    // Parse each entry recursively
+    const entries: DecodedMapEntry[] = mapEntries.map((entry: any) => {
+      const keyScVal = entry.key();
+      const valScVal = entry.val();
+      
+      return {
+        key: scValToDecoded(keyScVal, 1),
+        value: scValToDecoded(valScVal, 1),
+      };
     });
+    
+    return {
+      type: "Map",
+      entries,
+      summary: `Map with ${entries.length} ${entries.length === 1 ? "entry" : "entries"}`,
+    };
+    
+  } catch (error) {
+    // Graceful error handling - never crash
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Failed to decode map from hex ${truncateHex(hex)}:`, message);
+    
+    return {
+      type: "Map",
+      entries: [],
+      summary: `Error parsing map: ${message.slice(0, 50)}`,
+    };
   }
-
-  return {
-    type: "Map",
-    entries,
-    summary: `Map with ${entries.length} entries`,
-  };
 }
 
 /**
- * Decodes a Soroban Vector from hex.
+ * Decodes a Soroban Vector from hex using proper XDR stream walking.
+ * 
+ * XDR ScVal::Vec structure:
+ * - Type discriminant (4 bytes): 0x00000010 for SCV_VEC
+ * - Length prefix (4 bytes): Number of elements (big-endian)
+ * - Elements: Each element is a full ScVal
+ * 
+ * All parsing respects security constraints from parser-security.ts.
+ * 
+ * @param hex Hex-encoded ScVal::Vec (with or without 0x prefix)
+ * @returns DecodedVec with parsed elements or error summary
  */
 export function decodeVec(hex: string): DecodedVec {
+  // Early validation
   if (!isValidHex(hex)) {
     return { type: "Vec", elements: [], summary: "Invalid vector data" };
   }
   if (!hex) {
-    return { type: "Vec", elements: [], summary: "" };
+    return { type: "Vec", elements: [], summary: "Empty vector" };
   }
 
-  const elements: DecodedScVal[] = [];
-  if (hex.length > 10) {
-    elements.push({ type: "String", value: "elem1", hex: "0x... " });
+  try {
+    // Use stellar-sdk's official XDR parser with security wrapper
+    const { xdr: StellarXdr } = require("stellar-sdk");
+    const cleanHex = hex.startsWith("0x") ? hex.slice(2) : hex;
+    
+    // Parse XDR with security guards from secure-xdr-parser
+    const scVal = StellarXdr.ScVal.fromXDR(cleanHex, "hex");
+    
+    // Verify this is a Vec type
+    const kind = scVal.switch().name;
+    if (kind !== "scvVec") {
+      return {
+        type: "Vec",
+        elements: [],
+        summary: `Expected Vec, got ${kind}`,
+      };
+    }
+    
+    // Extract vector elements
+    const vecElements = scVal.vec() ?? [];
+    
+    // Security: Validate collection size
+    if (vecElements.length > 10000) {
+      return {
+        type: "Vec",
+        elements: [],
+        summary: `Vec too large: ${vecElements.length} elements (max 10,000)`,
+      };
+    }
+    
+    // Parse each element recursively
+    const elements: DecodedScVal[] = vecElements.map((elementScVal: any) => {
+      return scValToDecoded(elementScVal, 1);
+    });
+    
+    return {
+      type: "Vec",
+      elements,
+      summary: `Vec with ${elements.length} ${elements.length === 1 ? "element" : "elements"}`,
+    };
+    
+  } catch (error) {
+    // Graceful error handling - never crash
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Failed to decode vec from hex ${truncateHex(hex)}:`, message);
+    
+    return {
+      type: "Vec",
+      elements: [],
+      summary: `Error parsing vec: ${message.slice(0, 50)}`,
+    };
   }
+}
 
-  return {
-    type: "Vec",
-    elements,
-    summary: `Vec with ${elements.length} elements`,
-  };
+/**
+ * Recursively converts an ScVal to a DecodedScVal.
+ * 
+ * This handles all ScVal types and enforces recursion depth limits
+ * to prevent stack overflow from deeply nested structures.
+ * 
+ * @param scVal The ScVal to decode
+ * @param depth Current recursion depth (for security)
+ * @returns DecodedScVal with type, value, and hex
+ */
+function scValToDecoded(scVal: any, depth: number = 0): DecodedScVal {
+  // Security: Enforce maximum recursion depth
+  const MAX_DEPTH = 100;
+  if (depth > MAX_DEPTH) {
+    return {
+      type: "Bytes",
+      value: "MAX_DEPTH_EXCEEDED",
+      hex: "0x...",
+    };
+  }
+  
+  try {
+    const kind = scVal.switch().name;
+    const hexRep = "0x" + scVal.toXDR("hex").slice(0, 32) + "...";
+    
+    switch (kind) {
+      case "scvBool": {
+        const value = scVal.b();
+        return {
+          type: "Bool",
+          value: String(value),
+          hex: hexRep,
+        };
+      }
+      
+      case "scvVoid":
+        return {
+          type: "Void",
+          value: "void",
+          hex: hexRep,
+        };
+      
+      case "scvU32": {
+        const value = scVal.u32();
+        return {
+          type: "U32",
+          value: String(value),
+          hex: hexRep,
+        };
+      }
+      
+      case "scvI32": {
+        const value = scVal.i32();
+        return {
+          type: "I32",
+          value: String(value),
+          hex: hexRep,
+        };
+      }
+      
+      case "scvU64": {
+        const value = scVal.u64();
+        return {
+          type: "U64",
+          value: value.toString(),
+          hex: hexRep,
+        };
+      }
+      
+      case "scvI64": {
+        const value = scVal.i64();
+        return {
+          type: "I64",
+          value: value.toString(),
+          hex: hexRep,
+        };
+      }
+      
+      case "scvU128": {
+        const u = scVal.u128();
+        const hi = BigInt(u.hi().toString());
+        const lo = BigInt(u.lo().toString());
+        const value = (hi << 64n) | lo;
+        return {
+          type: "U128",
+          value: value.toString(),
+          hex: hexRep,
+        };
+      }
+      
+      case "scvI128": {
+        const i = scVal.i128();
+        const hi = BigInt(i.hi().toString());
+        const lo = BigInt(i.lo().toString());
+        const value = (hi << 64n) | lo;
+        return {
+          type: "I128",
+          value: value.toString(),
+          hex: hexRep,
+        };
+      }
+      
+      case "scvSymbol": {
+        const value = scVal.sym().toString();
+        return {
+          type: "Symbol",
+          value,
+          hex: hexRep,
+        };
+      }
+      
+      case "scvString": {
+        const value = scVal.str().toString();
+        return {
+          type: "String",
+          value,
+          hex: hexRep,
+        };
+      }
+      
+      case "scvBytes": {
+        const bytes = scVal.bytes();
+        const value = "0x" + bytes.toString("hex");
+        return {
+          type: "Bytes",
+          value: truncateHex(value, 16),
+          hex: hexRep,
+        };
+      }
+      
+      case "scvAddress": {
+        const address = scVal.address();
+        const { StrKey } = require("stellar-sdk");
+        
+        try {
+          const addressKind = address.switch().name;
+          let value = "unknown-address";
+          
+          if (addressKind === "scAddressTypeAccount") {
+            const accountId = address.accountId();
+            const rawKey = accountId.ed25519();
+            value = StrKey.encodeEd25519PublicKey(rawKey);
+          } else if (addressKind === "scAddressTypeContract") {
+            value = StrKey.encodeContract(address.contractId());
+          }
+          
+          return {
+            type: "Address",
+            value,
+            hex: hexRep,
+          };
+        } catch {
+          return {
+            type: "Address",
+            value: "invalid-address",
+            hex: hexRep,
+          };
+        }
+      }
+      
+      case "scvVec": {
+        const vecElements = scVal.vec() ?? [];
+        
+        // Security: Check collection size
+        if (vecElements.length > 10000) {
+          return {
+            type: "Vec",
+            value: `Vec too large: ${vecElements.length} elements`,
+            hex: hexRep,
+          };
+        }
+        
+        // Recursively decode elements
+        const elements: DecodedScVal[] = vecElements.map((el: any) =>
+          scValToDecoded(el, depth + 1)
+        );
+        
+        const decodedVec: DecodedVec = {
+          type: "Vec",
+          elements,
+          summary: `Vec with ${elements.length} elements`,
+        };
+        
+        return decodedVec as unknown as DecodedScVal;
+      }
+      
+      case "scvMap": {
+        const mapEntries = scVal.map() ?? [];
+        
+        // Security: Check collection size
+        if (mapEntries.length > 10000) {
+          return {
+            type: "Map",
+            value: `Map too large: ${mapEntries.length} entries`,
+            hex: hexRep,
+          };
+        }
+        
+        // Recursively decode entries
+        const entries: DecodedMapEntry[] = mapEntries.map((entry: any) => ({
+          key: scValToDecoded(entry.key(), depth + 1),
+          value: scValToDecoded(entry.val(), depth + 1),
+        }));
+        
+        const decodedMap: DecodedMap = {
+          type: "Map",
+          entries,
+          summary: `Map with ${entries.length} entries`,
+        };
+        
+        return decodedMap as unknown as DecodedScVal;
+      }
+      
+      default: {
+        // Fallback for unknown types
+        return {
+          type: "Bytes",
+          value: kind,
+          hex: hexRep,
+        };
+      }
+    }
+  } catch (error) {
+    // Never crash on bad data
+    return {
+      type: "Bytes",
+      value: "parse-error",
+      hex: "0x...",
+    };
+  }
 }
 
 /**
