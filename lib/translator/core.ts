@@ -18,6 +18,7 @@
  *     string slicing for the same high-frequency contract addresses.
  */
 
+import { xdr, StrKey } from "stellar-sdk";
 import type {
   DecodedAddress,
   DecodedAmount,
@@ -165,6 +166,12 @@ export function shortenAddress(publicKey: string): string {
   return short;
 }
 
+// Memoization cache for decodeAddress
+const decodeAddressMemo = new Map<string, DecodedAddress>();
+// Object pool to reuse DecodedAddress objects
+const decodedAddressPool: DecodedAddress[] = [];
+const MAX_POOL_SIZE = 100;
+
 /**
  * Object pool for DecodedAddress instances.
  *
@@ -184,9 +191,10 @@ const addressPool: DecodedAddress[] = Array.from(
 let addressPoolIndex = 0;
 
 export function decodeAddress(hex: string): DecodedAddress {
-  const seed = hex.slice(2, 10).toUpperCase();
-  const tail = hex.slice(-4).toUpperCase();
-  const publicKey = `G${seed}${"A".repeat(48 - seed.length)}${tail}`;
+  // Check memo cache first
+  if (decodeAddressMemo.has(hex)) {
+    return decodeAddressMemo.get(hex)!;
+  }
 
   const obj = addressPool[addressPoolIndex];
   obj.publicKey = publicKey;
