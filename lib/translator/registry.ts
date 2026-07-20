@@ -19,9 +19,16 @@
 
 import { createAllSacBlueprints } from "./blueprints/sac-transfer";
 import { createSacMintBurnBlueprint } from "./blueprints/sac-mint-burn";
-import { decodeEventName } from "./core";
-import { sanitizeTextField } from "./core";
+import { createAllSdexBlueprints } from "./blueprints/sdex-orderbook";
+import {
+  decodeEventName,
+  sanitizeTextField,
+  decodeAddress,
+  decodeAmount,
+  interpolateTemplate,
+} from "./core";
 import { decodeGenericEventPayload, formatGenericValue } from "./generic-fallback-decoder";
+import { getTranslation } from "./translations";
 import { RegistryTemplateException } from "../errors";
 import type {
   EventMatchCriteria,
@@ -416,13 +423,15 @@ export function translateEvent(
 
   if (!schema) {
     console.warn(`No translation blueprint found for contract ${event.contractId}`);
-    
+
+    const t = getTranslation(lang);
+
     // Try to decode the event using the generic fallback decoder
-    const genericDecoded = decodeGenericEventPayload(event);
+    const genericDecoded = decodeGenericEventPayload(event, lang);
     const description = genericDecoded
-      ? `[Unregistered Contract] ${formatGenericValue(genericDecoded)}`
-      : `[Unknown Event: No blueprint registered for contract ${event.contractId}. Hex Data: ${event.data}]`;
-    
+      ? t.generic.unregisteredContractDescription(formatGenericValue(genericDecoded))
+      : t.generic.unknownEventNoBlueprint(event.contractId, event.data);
+
     return {
       raw: event,
       description: sanitizeTextField(description, { maxLength: 512 }),
@@ -430,7 +439,7 @@ export function translateEvent(
       // Surface the custom contract name (if any) so the UI still has context.
       blueprintName: customBlueprints?.get(event.contractId)?.contractName
         ? sanitizeTextField(customBlueprints.get(event.contractId)!.contractName, { maxLength: 100 })
-        : "Unregistered Contract",
+        : t.generic.unregisteredContractName,
       eventType: null,
       schemaVersion: null,
     };
@@ -440,9 +449,10 @@ export function translateEvent(
 
   if (!blueprint) {
     console.warn(`No translation blueprint applicable for contract ${event.contractId} at ledger ${event.ledger}`);
+    const t = getTranslation(lang);
     return {
       raw: event,
-      description: `[Unknown Event: No blueprint applicable for contract ${event.contractId} at ledger ${event.ledger}. Hex Data: ${event.data}]`,
+      description: t.generic.unknownEventNoBlueprintApplicable(event.contractId, event.ledger, event.data),
       status: "cryptic",
       blueprintName: schema.blueprint.contractName,
       eventType: null,
